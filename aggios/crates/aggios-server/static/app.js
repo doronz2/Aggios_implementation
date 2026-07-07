@@ -158,12 +158,204 @@ async function refreshAll() {
 /* ---------------- rendering ---------------- */
 
 function renderAll() {
+  renderGuide();
   renderOverview();
   renderAdmin();
   renderVoters();
   renderAggregators();
   renderValidator();
 }
+
+/* ---------------- dynamic step-by-step guide ---------------- */
+
+const GUIDE_TOTAL = 10;
+
+function computeGuide() {
+  if (!electionData) {
+    return {
+      step: 1, tab: "admin", title: "Create an election",
+      detail: "Everything starts in the Admin tab: pick a template and create the election.",
+      example: 'Example: keep the "Representative election (Alice / Bob / Charlie)" template and press Create election.',
+    };
+  }
+  const e = electionData;
+  if (e.phase === "setup") {
+    return {
+      step: 2, tab: "admin", title: "Open registration",
+      detail: "The election exists, but voters cannot register until the registration phase is open.",
+      example: 'Example: in Admin → Phases & actions, press "Open registration".',
+    };
+  }
+  if (e.phase === "registration") {
+    if (e.num_voters === 0) {
+      return {
+        step: 3, tab: "voter", title: "Create demo voters",
+        detail: "Registration is open. Create some simulated voters (each gets real BLS signing and voting keys).",
+        example: "Example: in the Voter tab, create 9 demo voters.",
+      };
+    }
+    const unregistered = e.voters.filter((v) => !v.registered_with).length;
+    if (unregistered > 0) {
+      return {
+        step: 4, tab: "voter",
+        title: `Register ${unregistered} voter${unregistered > 1 ? "s" : ""} — each picks exactly one aggregator`,
+        detail: "Registering signs a BLS delegation for the chosen aggregator and sends the voting key over a (simulated) private channel.",
+        example: 'Example: choose A1 next to voter-1 and press Register — or press "Auto-assign & vote" to register everyone round-robin across A1/A2/A3.',
+      };
+    }
+    return {
+      step: 5, tab: "admin", title: "Close registration and open voting",
+      detail: "All voters are registered; freeze registration and let them vote.",
+      example: 'Example: in Admin, press "Close registration / open voting".',
+    };
+  }
+  if (e.phase === "voting") {
+    const pending = e.voters.filter((v) => v.registered_with && !v.has_voted).length;
+    if (pending > 0) {
+      return {
+        step: 6, tab: "voter",
+        title: `Cast ${pending} vote${pending > 1 ? "s" : ""}`,
+        detail: "Votes go to the voter's own aggregator (proxy voting), never to the public bulletin board. A registered voter who skips voting is counted as NO_VOTE.",
+        example: 'Example: pick a candidate next to each voter and press Vote — or press "Auto-assign & vote" to vote randomly for everyone.',
+      };
+    }
+    return {
+      step: 7, tab: "admin", title: "Close voting",
+      detail: "All votes are in; move the election to the tally phase.",
+      example: 'Example: in Admin, press "Close voting (tally phase)".',
+    };
+  }
+  // tally / closed
+  const notFinalized = e.aggregators.filter((a) => !a.finalized).length;
+  if (notFinalized > 0) {
+    return {
+      step: 8, tab: "admin", title: "Finalize the aggregator registrations",
+      detail: "Freezes each aggregator's voter set, assigns domain slots, and publishes registration tokens τᵢ with EqLog proofs; the validator checks them immediately.",
+      example: 'Example: in Admin, press "Finalize all registrations".',
+    };
+  }
+  const notProved = e.aggregators.filter((a) => a.proof_status === "ready").length;
+  if (notProved > 0) {
+    return {
+      step: 9, tab: "admin", title: "Generate the EPA tally proofs",
+      detail: "Each aggregator builds its tally partition (candidates + NO_VOTE + PAD) and runs the black-box EPA prover.",
+      example: 'Example: in Admin, press "Generate all EPA proofs".',
+    };
+  }
+  const notVerified = e.aggregators.filter((a) => a.proof_status === "proved").length;
+  if (notVerified > 0) {
+    return {
+      step: 10, tab: "admin", title: "Run the validator",
+      detail: "The validator recomputes C_commit from the public registration tokens, re-derives the labels, and verifies every EPA proof.",
+      example: 'Example: press "Validator: verify everything".',
+    };
+  }
+  const rejected = e.aggregators.filter((a) => a.proof_status === "rejected").length;
+  if (rejected > 0) {
+    return {
+      done: true, bad: true, tab: "validator", title: "Some proofs were rejected",
+      detail: "Rejected aggregators are excluded from the verified global tally.",
+      example: "Check the Validator tab for the specific errors.",
+    };
+  }
+  return {
+    done: true, tab: "overview", title: "Election complete — all proofs verified",
+    detail: "The verified global tally (NO_VOTE and PAD excluded) is final.",
+    example: "See it in the Overview tab, inspect the bulletin board, or download the public artifact JSON in the Validator tab.",
+  };
+}
+
+function renderGuide() {
+  const el = $("#guide");
+  if (!el) return;
+  const g = computeGuide();
+  const badge = g.done
+    ? `<span class="guide-step done">${g.bad ? "!" : "✓"}</span>`
+    : `<span class="guide-step">Next step ${g.step}/${GUIDE_TOTAL}</span>`;
+  el.innerHTML = `
+    ${badge}
+    <span class="guide-text">
+      <strong>${esc(g.title)}</strong> — ${esc(g.detail)}
+      <div class="guide-example">${esc(g.example)}</div>
+    </span>
+    <span class="btn-row">
+      <button onclick="activateTab('${g.tab}')">Go to ${g.tab.charAt(0).toUpperCase() + g.tab.slice(1)} tab</button>
+      <button id="guide-example-btn" class="ghost" onclick="runExample()"
+        title="Creates a fresh 9-voter representative election and runs every step automatically">
+        Run the whole example for me</button>
+    </span>`;
+}
+
+/* One-click worked example: fresh 9-voter election through every step. */
+let exampleRunning = false;
+window.runExample = async () => {
+  if (exampleRunning) return;
+  exampleRunning = true;
+  const btn = $("#guide-example-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Running example…"; }
+  activateTab("admin");
+  try {
+    log("=== worked example: 9 voters, 3 aggregators, 3 candidates ===");
+    const created = await api("/elections", {
+      method: "POST",
+      body: JSON.stringify({ template: "representative", title: "Worked example" }),
+    });
+    currentElection = created.election.election_id;
+    const eid = currentElection;
+    const candidates = created.election.candidates.map((c) => c.id);
+    const aggregators = created.election.aggregators;
+    log(`1. created election ${eid} (Alice / Bob / Charlie)`);
+
+    await api(`/elections/${eid}/phase`, { method: "POST", body: JSON.stringify({ phase: "registration" }) });
+    log("2. opened registration");
+
+    const voters = (await api(`/elections/${eid}/voters/demo-create`, {
+      method: "POST", body: JSON.stringify({ count: 9 }),
+    })).created;
+    log("3. created 9 demo voters (real BLS + voting keys)");
+
+    for (let i = 0; i < voters.length; i++) {
+      await api(`/elections/${eid}/register`, {
+        method: "POST",
+        body: JSON.stringify({ voter_id: voters[i], aggregator_id: aggregators[i % aggregators.length] }),
+      });
+    }
+    log("4. registered all voters round-robin (BLS delegations verified by each aggregator)");
+
+    await api(`/elections/${eid}/phase`, { method: "POST", body: JSON.stringify({ phase: "voting" }) });
+    log("5. closed registration, opened voting");
+
+    for (let i = 0; i < voters.length; i++) {
+      await api(`/elections/${eid}/vote`, {
+        method: "POST",
+        body: JSON.stringify({ voter_id: voters[i], candidate_id: candidates[i % candidates.length] }),
+      });
+    }
+    log("6. all 9 voters voted (3 each — sent privately to their aggregator)");
+
+    await api(`/elections/${eid}/phase`, { method: "POST", body: JSON.stringify({ phase: "tally" }) });
+    log("7. closed voting (tally phase)");
+
+    for (const a of aggregators) {
+      const fin = await api(`/elections/${eid}/aggregators/${a}/finalize-registration`, { method: "POST", body: "{}" });
+      log(`8. ${a}: registration finalized + validated (${fin.ok ? "valid" : "INVALID"})`);
+    }
+    for (const a of aggregators) {
+      const p = await api(`/elections/${eid}/aggregators/${a}/prove`, { method: "POST", body: "{}" });
+      log(`9. ${a}: EPA proof generated in ${p.proving_time_ms} ms (${p.proof_size_bytes} bytes)`);
+    }
+    const all = await api(`/elections/${eid}/verify-all`, { method: "POST", body: "{}" });
+    log(`10. validator verified everything: ${JSON.stringify(all.verified_global_tally)}`);
+    log("=== example complete — see Overview for the verified tally ===");
+    await refreshAll();
+    activateTab("overview");
+  } catch (err) {
+    log(`example failed: ${err.message}`, true);
+  } finally {
+    exampleRunning = false;
+    renderGuide();
+  }
+};
 
 function tallyBars(tally, candidates) {
   const total = Object.values(tally).reduce((a, b) => a + b, 0) || 1;
