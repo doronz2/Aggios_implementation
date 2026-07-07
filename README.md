@@ -99,13 +99,13 @@ Facts about the existing EPA implementation the adapter adapts to (documented in
 
 ## What is NOT implemented
 
-- EPA internals (used as-is, unmodified)
 - Aggios-Split, VWF, ACE, vote dilution, coercion resistance
 - Real blockchain deployment
 - Production trusted setup (the SRS is derived from a fixed seed)
-- **Voter receipts**: the black-box EPA implementation only exposes *blinded*
-  partition commitments with no opening API, so inclusion receipts cannot be issued
-  without reimplementing EPA internals. The receipt endpoints report this honestly.
+- EPA is used as a black box
+  ([mariuslp/aggios_epa_benchmark](https://github.com/mariuslp/aggios_epa_benchmark));
+  its internals are not implemented here
+- Receipts of inclusion
 
 ## Running
 
