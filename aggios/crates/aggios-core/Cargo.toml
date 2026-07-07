@@ -1,0 +1,29 @@
+[package]
+name = "aggios-core"
+version = "0.1.0"
+edition = "2021"
+description = "Basic Aggios voting layer: all cryptography outside the black-box EPA proof"
+
+[dependencies]
+# The existing EPA implementation, used strictly as a black box.
+epa = { package = "aggios", path = "../../../aggios_epa_benchmark" }
+
+# Same arkworks stack as the EPA crate (types must be compatible).
+ark-ff = { version = "^0.3.0", default-features = false }
+ark-ec = { version = "^0.3.0", default-features = false }
+ark-serialize = { version = "^0.3.0", default-features = false, features = ["derive"] }
+ark-poly = { version = "^0.3.0", default-features = false }
+ark-std = { version = "^0.3.0", default-features = false, features = ["parallel"] }
+ark-bls12-381 = { version = "^0.3.0", features = ["std"] }
+ark-poly-commit = { version = "^0.3.0", default-features = false }
+
+rand = "0.8.5"
+rayon = "1.5.2"
+sha2 = "0.10"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -1,0 +1,13 @@
+# local clone of the website repo (deployed separately)
+doronz2.github.io/
+
+# build artifacts
+target/
+aggios/web/dist/
+results/
+
+# local backup of the vendored EPA repo's git dir
+aggios_epa_benchmark/.git.upstream-backup/
+
+.DS_Store
+node_modules/

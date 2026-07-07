@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aggios-core",
+    "crates/aggios-server",
+    "crates/aggios-wasm",
+]
+# `cargo run --release -- benchmark ...` from the workspace root runs the server binary.
+default-members = ["crates/aggios-server"]
+
+[profile.release]
+debug = false
+lto = "thin"
+
+# The EPA crate (aggios_epa_benchmark) is pulled in as a path dependency of
+# aggios-core. It is treated as a black box: we only added a src/lib.rs
+# re-exporting its existing modules.

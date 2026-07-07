@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aggios — Aggregator-Based Voting Demo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>Aggios</h1>
+    <span class="sub">Aggregator-based voting with EPA proofs of partition</span>
+  </div>
+  <div class="election-picker">
+    <label for="election-select">Election</label>
+    <select id="election-select"></select>
+    <button id="refresh-btn" class="ghost" title="Refresh">&#8635;</button>
+  </div>
+</header>
+
+<div class="banner">
+  This demo implements <strong>basic Aggios</strong>, not Aggios-Split.
+  In basic Aggios, <strong>the selected aggregator learns the vote</strong> (proxy voting);
+  public observers only see tallies, commitments, and proofs.
+</div>
+
+<nav id="tabs">
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="admin">Admin</button>
+  <button data-tab="voter">Voter</button>
+  <button data-tab="aggregators">Aggregators</button>
+  <button data-tab="validator">Validator / Bulletin board</button>
+  <button data-tab="benchmark">Benchmark</button>
+</nav>
+
+<main>
+
+<!-- ============ Overview ============ -->
+<section id="tab-overview" class="tab active">
+  <div class="card">
+    <h2>What is basic Aggios?</h2>
+    <p>
+      Aggios is an aggregator-based (proxy) voting protocol. Voters do not post votes
+      on-chain; instead each voter <em>delegates</em> to exactly one aggregator of their
+      choice. Aggregators collect votes, publish a tally, and prove the tally correct with
+      an <strong>EPA proof</strong> — a succinct proof that a committed vector of voter
+      tokens is partitioned into disjoint, labeled subsets of publicly claimed sizes
+      (one subset per candidate, plus internal NO_VOTE and PAD subsets).
+      Validators verify the proofs; the final result sums only verified aggregators.
+    </p>
+    <div class="flow">
+      <span class="flow-node">Voters</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-node">Aggregators A1 / A2 / A3</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-node">EPA proofs</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-node">Validators</span><span class="flow-arrow">&rarr;</span>
+      <span class="flow-node">Final tally</span>
+    </div>
+    <h3>Cryptography in this demo</h3>
+    <ul>
+      <li><strong>BLS delegation signatures</strong> — voters sign
+        <code>"AGGIOS_DELEGATION" || election_id || aggregator_id</code> binding them to one aggregator.</li>
+      <li><strong>Registration tokens</strong> — τ<sub>i</sub> = skv<sub>i</sub> · B<sub>i</sub>, where
+        B<sub>i</sub> is the KZG commitment to the voter's Lagrange slot; validators rebuild the
+        committed vector as Σ τ<sub>i</sub>.</li>
+      <li><strong>EqLog proofs</strong> — cross-group proof that τ<sub>i</sub> and the voting key
+        pkv<sub>i</sub> use the same secret scalar.</li>
+      <li><strong>EPA proof of partition</strong> — the existing EPA implementation, used strictly
+        as a black box, proves the tally partitions the committed token vector.</li>
+    </ul>
+    <p class="note">
+      Demo caveats: the KZG SRS is generated from a fixed seed (no trusted setup), the backend
+      simulates voters' wallets and private channels, and voter receipts are unavailable because
+      the black-box EPA implementation exposes no partition-opening API.
+    </p>
+  </div>
+  <div class="card">
+    <h2>Current election</h2>
+    <div id="overview-status" class="muted">No election selected. Create one in the Admin tab.</div>
+    <div id="overview-tally"></div>
+  </div>
+</section>
+
+<!-- ============ Admin ============ -->
+<section id="tab-admin" class="tab">
+  <div class="card">
+    <h2>Create election</h2>
+    <div class="form-grid">
+      <label>Template
+        <select id="new-template">
+          <option value="representative">Representative election (Alice / Bob / Charlie)</option>
+          <option value="crime-reform">Crime reform policy vote (4 options)</option>
+          <option value="custom">Custom options</option>
+        </select>
+      </label>
+      <label>Title <input id="new-title" placeholder="(template default)"></label>
+      <label id="custom-options-wrap" class="hidden">Custom options (one per line)
+        <textarea id="new-options" rows="4" placeholder="Option A&#10;Option B"></textarea>
+      </label>
+      <label>Aggregators (comma-separated) <input id="new-aggregators" value="A1, A2, A3"></label>
+    </div>
+    <button id="create-election-btn" class="primary">Create election</button>
+  </div>
+
+  <div class="card">
+    <h2>Phases &amp; actions</h2>
+    <div id="admin-phase" class="muted">Select an election first.</div>
+    <div class="btn-row">
+      <button class="phase-btn" data-phase="registration">Open registration</button>
+      <button class="phase-btn" data-phase="voting">Close registration / open voting</button>
+      <button class="phase-btn" data-phase="tally">Close voting (tally phase)</button>
+      <button class="phase-btn" data-phase="closed">Close election</button>
+    </div>
+    <h3>Aggregator operations</h3>
+    <div id="admin-aggregator-actions"></div>
+    <div class="btn-row">
+      <button id="admin-finalize-all">Finalize all registrations</button>
+      <button id="admin-prove-all">Generate all EPA proofs</button>
+      <button id="admin-verify-all" class="primary">Validator: verify everything</button>
+    </div>
+    <pre id="admin-log" class="log"></pre>
+  </div>
+</section>
+
+<!-- ============ Voter ============ -->
+<section id="tab-voter" class="tab">
+  <div class="card">
+    <h2>Demo voters</h2>
+    <div class="btn-row">
+      <label class="inline">Create <input id="voter-count" type="number" value="9" min="1" max="500" style="width:5em"> demo voters</label>
+      <button id="create-voters-btn" class="primary">Create</button>
+      <button id="auto-run-btn" class="ghost" title="Registers all voters round-robin and votes randomly">Auto-assign &amp; vote</button>
+    </div>
+    <p class="note">The backend simulates each voter's wallet: it holds the voter's signing key,
+      signs the delegation, and sends skv to the chosen aggregator over a simulated private channel.
+      skv never appears on the bulletin board.</p>
+    <div id="voter-table"></div>
+  </div>
+</section>
+
+<!-- ============ Aggregators ============ -->
+<section id="tab-aggregators" class="tab">
+  <div id="aggregator-cards" class="cards-row"></div>
+</section>
+
+<!-- ============ Validator ============ -->
+<section id="tab-validator" class="tab">
+  <div class="card">
+    <h2>Validator</h2>
+    <div class="btn-row">
+      <button id="validator-verify-all" class="primary">Run all validator checks</button>
+      <a id="download-artifact" class="button ghost" target="_blank">Download public artifact JSON</a>
+    </div>
+    <div id="validator-results"></div>
+    <h3>Verified global tally</h3>
+    <div id="validator-tally" class="muted">Run verification to compute the verified global tally.</div>
+  </div>
+  <div class="card">
+    <h2>Public election parameters</h2>
+    <div id="validator-params"></div>
+  </div>
+  <div class="card">
+    <h2>Bulletin board</h2>
+    <div id="bulletin-board" class="bulletin"></div>
+  </div>
+</section>
+
+<!-- ============ Benchmark ============ -->
+<section id="tab-benchmark" class="tab">
+  <div class="card">
+    <h2>Run benchmark</h2>
+    <div class="form-grid">
+      <label>Voters
+        <select id="bench-voters">
+          <option value="100">10&sup2; (100)</option>
+          <option value="1000">10&sup3; (1,000)</option>
+          <option value="10000">10&#8308; (10,000)</option>
+          <option value="100000">10&#8309; (100,000)</option>
+          <option value="1000000">10&#8310; (1,000,000)</option>
+        </select>
+      </label>
+      <label>Aggregators <input id="bench-aggregators" type="number" value="3" min="1" max="50"></label>
+      <label>Template
+        <select id="bench-template">
+          <option value="representative">Representative (3 candidates)</option>
+          <option value="crime-reform">Crime reform (4 options)</option>
+        </select>
+      </label>
+      <label>Assignment
+        <select id="bench-assignment">
+          <option value="round-robin">Round-robin</option>
+          <option value="uniform" selected>Uniform random</option>
+          <option value="weighted">Weighted random</option>
+          <option value="skewed">Skewed 80/15/5</option>
+        </select>
+      </label>
+      <label>Vote distribution
+        <select id="bench-votedist">
+          <option value="uniform" selected>Uniform</option>
+          <option value="fixed">Fixed percentages</option>
+          <option value="skewed">Skewed</option>
+        </select>
+      </label>
+      <label>Seed <input id="bench-seed" type="number" value="42"></label>
+      <label class="inline"><input id="bench-real" type="checkbox" checked> Real crypto mode</label>
+      <label class="inline"><input id="bench-receipts" type="checkbox" disabled> Receipts
+        <span class="note">(not available with current EPA API)</span></label>
+    </div>
+    <p class="note warn" id="bench-sim-note" style="display:none">
+      Simulation mode is counting-only and NON-CRYPTOGRAPHIC: no keys, no proofs, no verification.
+    </p>
+    <p class="note warn" id="bench-big-note" style="display:none">
+      Large real-crypto benchmarks are attempted honestly and can take hours and many GB of RAM;
+      failures (memory / time / SRS limits) are recorded with their reason, never downsampled.
+    </p>
+    <button id="bench-run" class="primary">Start benchmark</button>
+    <pre id="bench-live" class="log" style="display:none;margin-top:12px"></pre>
+  </div>
+  <div class="card">
+    <h2>Benchmark jobs</h2>
+    <div id="bench-jobs"></div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  Basic Aggios demo &mdash; full implementation source:
+  <a href="https://github.com/doronz2/Aggios_implementation" target="_blank" rel="noopener">doronz2/Aggios_implementation</a>.
+  EPA prover/verifier used as an existing black box
+  (<a href="https://github.com/mariuslp/aggios_epa_benchmark" target="_blank" rel="noopener">aggios_epa_benchmark</a>).
+  This page runs the complete stack in your browser via WebAssembly. Demo only; not audited for production use.
+</footer>
+
+<script src="boot.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
