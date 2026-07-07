@@ -136,9 +136,12 @@ $("#election-select").addEventListener("change", (e) => {
 
 $("#refresh-btn").addEventListener("click", () => refreshAll());
 
+let lastRenderedState = "";
+
 async function refreshElection() {
   if (!currentElection) {
     electionData = null;
+    lastRenderedState = "";
     renderAll();
     return;
   }
@@ -147,6 +150,11 @@ async function refreshElection() {
   } catch (err) {
     electionData = null;
   }
+  // Skip the re-render when nothing changed (e.g. background polling), so
+  // in-progress dropdown selections and focus are not clobbered.
+  const state = JSON.stringify(electionData);
+  if (state === lastRenderedState) return;
+  lastRenderedState = state;
   renderAll();
 }
 
@@ -428,6 +436,19 @@ function statusPill(a) {
 
 function renderVoters() {
   const el = $("#voter-table");
+  // Preserve not-yet-submitted dropdown choices (aggregator/candidate per
+  // voter) across re-renders, so acting on one voter does not reset the
+  // others' selections.
+  const savedSelections = {};
+  el.querySelectorAll("select").forEach((s) => { savedSelections[s.id] = s.value; });
+  const restoreSelections = () => {
+    el.querySelectorAll("select").forEach((s) => {
+      const saved = savedSelections[s.id];
+      if (saved !== undefined && [...s.options].some((o) => o.value === saved)) {
+        s.value = saved;
+      }
+    });
+  };
   if (!electionData) { el.innerHTML = `<p class="muted">Select an election first.</p>`; return; }
   const e = electionData;
   if (!e.voters.length) { el.innerHTML = `<p class="muted">No demo voters yet.</p>`; return; }
@@ -450,6 +471,7 @@ function renderVoters() {
           : `<span class="muted">register first</span>`}</td>
       <td><button class="ghost" onclick="checkReceipt('${esc(v.voter_id)}')">Check</button></td>
     </tr>`).join("") + `</tbody></table>`;
+  restoreSelections();
 }
 
 function renderAggregators() {
